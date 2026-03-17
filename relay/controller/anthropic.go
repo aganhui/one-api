@@ -192,6 +192,8 @@ func RelayAnthropicHelper(c *gin.Context) *model.ErrorWithStatusCode {
 	actualModel, _ := getMappedModelName(anthropicReq.Model, m.ModelMapping)
 	m.ActualModelName = actualModel
 	anthropicReq.Model = actualModel
+	// 强制将转发路径改为 OpenAI chat completions，避免后端节点收到 /v1/messages
+	m.RequestURLPath = "/v1/chat/completions"
 
 	// 转换为 OpenAI 通用格式
 	openaiReq := anthropicNativeRequestToOpenAI(anthropicReq)
