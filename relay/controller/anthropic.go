@@ -288,6 +288,7 @@ func anthropicNonStreamRelay(c *gin.Context, resp *http.Response, modelName stri
 }
 
 // anthropicStreamRelay 流式：将 OpenAI SSE 转换为 Anthropic SSE 格式输出
+// 若后端已返回 Anthropic 格式 SSE，则直接透传
 func anthropicStreamRelay(c *gin.Context, resp *http.Response, promptTokens int) (*model.Usage, *model.ErrorWithStatusCode) {
 	common.SetEventStreamHeaders(c)
 	defer resp.Body.Close()
@@ -307,9 +308,18 @@ func anthropicStreamRelay(c *gin.Context, resp *http.Response, promptTokens int)
 	})
 
 	var usage model.Usage
+	usage.PromptTokens = promptTokens
+
+	// 探测第一个有效 data 行，判断格式
+	// Anthropic SSE: type 字段为 message_start / content_block_start 等
+	// OpenAI SSE: 含 choices 字段
+	isAnthropicFormat := false
+	formatDetected := false
 	started := false
 	index := 0
 	var msgId, modelName string
+
+	var completionTokens int
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -320,72 +330,116 @@ func anthropicStreamRelay(c *gin.Context, resp *http.Response, promptTokens int)
 		if data == "[DONE]" {
 			break
 		}
-		var chunk openai.ChatCompletionsStreamResponse
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			logger.SysError("unmarshal stream chunk failed: " + err.Error())
-			continue
-		}
 
-		if !started {
-			started = true
-			msgId = strings.TrimPrefix(chunk.Id, "chatcmpl-")
-			modelName = chunk.Model
-			// message_start
-			_ = render.ObjectData(c, map[string]any{
-				"type": "message_start",
-				"message": map[string]any{
-					"id": msgId, "type": "message", "role": "assistant",
-					"model": modelName, "content": []any{},
-					"stop_reason": nil, "stop_sequence": nil,
-					"usage": map[string]any{"input_tokens": promptTokens, "output_tokens": 0},
-				},
-			})
-			// content_block_start
-			_ = render.ObjectData(c, map[string]any{
-				"type": "content_block_start", "index": index,
-				"content_block": map[string]any{"type": "text", "text": ""},
-			})
-		}
-
-		for _, choice := range chunk.Choices {
-			if text, ok := choice.Delta.Content.(string); ok && text != "" {
-				_ = render.ObjectData(c, map[string]any{
-					"type": "content_block_delta", "index": index,
-					"delta": map[string]any{"type": "text_delta", "text": text},
-				})
+		// 探测格式
+		if !formatDetected {
+			formatDetected = true
+			var probe map[string]any
+			if err := json.Unmarshal([]byte(data), &probe); err == nil {
+				_, hasType := probe["type"]
+				_, hasChoices := probe["choices"]
+				if hasType && !hasChoices {
+					isAnthropicFormat = true
+				}
 			}
-			if choice.FinishReason != nil && *choice.FinishReason != "" && *choice.FinishReason != "null" {
-				sr := openAIStopReasonToAnthropic(*choice.FinishReason)
-				// content_block_stop
+		}
+
+		if isAnthropicFormat {
+			// 直接透传，但修正 message_start 里的 input_tokens
+			var event map[string]any
+			if err := json.Unmarshal([]byte(data), &event); err != nil {
+				render.StringData(c, "data: "+data)
+				continue
+			}
+			eventType, _ := event["type"].(string)
+			switch eventType {
+			case "message_start":
+				// 用本机计算的 promptTokens 覆盖
+				if msg, ok := event["message"].(map[string]any); ok {
+					if u, ok := msg["usage"].(map[string]any); ok {
+						u["input_tokens"] = promptTokens
+					}
+				}
+			case "content_block_delta":
+				if delta, ok := event["delta"].(map[string]any); ok {
+					if delta["type"] == "text_delta" {
+						if t, ok := delta["text"].(string); ok {
+							completionTokens += len(strings.Fields(t)) // 粗略估算
+						}
+					}
+				}
+			case "message_delta":
+				// 修正 usage
+				if u, ok := event["usage"].(map[string]any); ok {
+					if outTok, ok := u["output_tokens"].(float64); ok && outTok > 0 {
+						usage.CompletionTokens = int(outTok)
+					} else {
+						u["output_tokens"] = completionTokens
+						usage.CompletionTokens = completionTokens
+					}
+					u["input_tokens"] = promptTokens
+				}
+			}
+			_ = render.ObjectData(c, event)
+		} else {
+			// OpenAI SSE 格式，转换为 Anthropic
+			var chunk openai.ChatCompletionsStreamResponse
+			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+				logger.SysError("unmarshal stream chunk failed: " + err.Error())
+				continue
+			}
+			if !started {
+				started = true
+				msgId = strings.TrimPrefix(chunk.Id, "chatcmpl-")
+				modelName = chunk.Model
 				_ = render.ObjectData(c, map[string]any{
-					"type": "content_block_stop", "index": index,
-				})
-				// message_delta
-				_ = render.ObjectData(c, map[string]any{
-					"type": "message_delta",
-					"delta": map[string]any{
-						"stop_reason": sr, "stop_sequence": nil,
+					"type": "message_start",
+					"message": map[string]any{
+						"id": msgId, "type": "message", "role": "assistant",
+						"model": modelName, "content": []any{},
+						"stop_reason": nil, "stop_sequence": nil,
+						"usage": map[string]any{"input_tokens": promptTokens, "output_tokens": 0},
 					},
-					"usage": map[string]any{"input_tokens": promptTokens, "output_tokens": usage.CompletionTokens},
+				})
+				_ = render.ObjectData(c, map[string]any{
+					"type": "content_block_start", "index": index,
+					"content_block": map[string]any{"type": "text", "text": ""},
 				})
 			}
-		}
-		// 累计 usage（若 chunk 包含 usage 字段）
-		if chunk.Usage != nil {
-			usage.PromptTokens = chunk.Usage.PromptTokens
-			usage.CompletionTokens = chunk.Usage.CompletionTokens
-			usage.TotalTokens = chunk.Usage.TotalTokens
+			for _, choice := range chunk.Choices {
+				if text, ok := choice.Delta.Content.(string); ok && text != "" {
+					completionTokens++
+					_ = render.ObjectData(c, map[string]any{
+						"type": "content_block_delta", "index": index,
+						"delta": map[string]any{"type": "text_delta", "text": text},
+					})
+				}
+				if choice.FinishReason != nil && *choice.FinishReason != "" && *choice.FinishReason != "null" {
+					sr := openAIStopReasonToAnthropic(*choice.FinishReason)
+					_ = render.ObjectData(c, map[string]any{
+						"type": "content_block_stop", "index": index,
+					})
+					_ = render.ObjectData(c, map[string]any{
+						"type": "message_delta",
+						"delta": map[string]any{"stop_reason": sr, "stop_sequence": nil},
+						"usage": map[string]any{"input_tokens": promptTokens, "output_tokens": completionTokens},
+					})
+				}
+			}
+			if chunk.Usage != nil && chunk.Usage.CompletionTokens > 0 {
+				usage.CompletionTokens = chunk.Usage.CompletionTokens
+				usage.TotalTokens = chunk.Usage.TotalTokens
+			}
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
 		logger.SysError("error reading stream: " + err.Error())
 	}
-	// 若后端未返回 usage，用提示词 token 数补全
-	if usage.TotalTokens == 0 || (usage.PromptTokens == 0 && usage.CompletionTokens == 0) {
-		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+	if usage.CompletionTokens == 0 {
+		usage.CompletionTokens = completionTokens
 	}
-	// message_stop
+	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 	_ = render.ObjectData(c, map[string]any{"type": "message_stop"})
 	render.Done(c)
 	return &usage, nil
