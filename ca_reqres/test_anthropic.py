@@ -70,10 +70,10 @@ def test_model(model_name: str, label: str, stream: bool = False):
 
 
 if __name__ == "__main__":
-    # 非流式测试
-    test_model(ANTHROPIC_DEFAULT_OPUS_MODEL,   "Opus",   stream=False)
-    test_model(ANTHROPIC_DEFAULT_SONNET_MODEL, "Sonnet", stream=False)
-    test_model(ANTHROPIC_DEFAULT_HAIKU_MODEL,  "Haiku",  stream=False)
+    # # 非流式测试
+    # test_model(ANTHROPIC_DEFAULT_OPUS_MODEL,   "Opus",   stream=False)
+    # test_model(ANTHROPIC_DEFAULT_SONNET_MODEL, "Sonnet", stream=False)
+    # test_model(ANTHROPIC_DEFAULT_HAIKU_MODEL,  "Haiku",  stream=False)
 
     # 流式测试
     test_model(ANTHROPIC_DEFAULT_OPUS_MODEL,   "Opus",   stream=True)

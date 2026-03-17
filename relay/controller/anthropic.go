@@ -296,9 +296,9 @@ func renderAnthropicEvent(c *gin.Context, eventType string, data any) {
 	if err != nil {
 		return
 	}
-	// SSE 规范：event: 和 data: 各占一行，用 \n\n 结尾
-	// CustomEvent 只在 data: 前缀时加 \n\n，所以手动拼接完整事件块
-	_, _ = c.Writer.WriteString("event: " + eventType + "\ndata: " + string(jsonData) + "\n\n")
+	// SSE 规范：每个字段单独一次 Write，确保换行符不被代理层合并
+	_, _ = c.Writer.WriteString("event: " + eventType + "\n")
+	_, _ = c.Writer.WriteString("data: " + string(jsonData) + "\n\n")
 	c.Writer.Flush()
 }
 
