@@ -148,7 +148,7 @@ type Response struct {
 	StopReason   *string   `json:"stop_reason"`
 	StopSequence *string   `json:"stop_sequence"`
 	Usage        Usage     `json:"usage"`
-	Error        Error     `json:"error"`
+	Error        *Error    `json:"error,omitempty"`
 }
 
 type Delta struct {

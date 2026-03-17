@@ -14,7 +14,7 @@ import (
 	"github.com/songquanpeng/one-api/common/logger"
 	"github.com/songquanpeng/one-api/common/render"
 	relayrelay "github.com/songquanpeng/one-api/relay"
-	anthropic "github.com/songquanpeng/one-api/relay/adaptor/anthropic"
+	anthropicAdaptor "github.com/songquanpeng/one-api/relay/adaptor/anthropic"
 	"github.com/songquanpeng/one-api/relay/adaptor/openai"
 	"github.com/songquanpeng/one-api/relay/billing"
 	billingratio "github.com/songquanpeng/one-api/relay/billing/ratio"
@@ -49,7 +49,8 @@ func parseAnthropicSystem(system any) string {
 }
 
 // anthropicNativeRequestToOpenAI 将 Anthropic 原生请求转为 OpenAI 通用格式
-func anthropicNativeRequestToOpenAI(req *anthropic.Request) *model.GeneralOpenAIRequest {
+// 支持 text / image / tool_use / tool_result 四种 content block 类型
+func anthropicNativeRequestToOpenAI(req *anthropicAdaptor.Request) *model.GeneralOpenAIRequest {
 	openaiReq := &model.GeneralOpenAIRequest{
 		Model:       req.Model,
 		MaxTokens:   req.MaxTokens,
@@ -68,35 +69,84 @@ func anthropicNativeRequestToOpenAI(req *anthropic.Request) *model.GeneralOpenAI
 
 	// messages
 	for _, msg := range req.Messages {
-		var contents []model.MessageContent
-		for _, c := range msg.ParseContents() {
+		contents := msg.ParseContents()
+
+		// ── 情形 A: assistant 消息，可能混合 text + tool_use ──────────────
+		if msg.Role == "assistant" {
+			var textParts []string
+			var toolCalls []model.Tool
+			for _, c := range contents {
+				switch c.Type {
+				case "text":
+					if c.Text != "" {
+						textParts = append(textParts, c.Text)
+					}
+				case "tool_use":
+					// Anthropic tool_use → OpenAI tool_call
+					argsBytes, _ := json.Marshal(c.Input)
+					toolCalls = append(toolCalls, model.Tool{
+						Id:   c.Id,
+						Type: "function",
+						Function: model.Function{
+							Name:      c.Name,
+							Arguments: string(argsBytes),
+						},
+					})
+				}
+			}
+			openaiMsg := model.Message{Role: "assistant"}
+			if len(textParts) > 0 {
+				openaiMsg.Content = strings.Join(textParts, "")
+			}
+			if len(toolCalls) > 0 {
+				openaiMsg.ToolCalls = toolCalls
+			}
+			openaiReq.Messages = append(openaiReq.Messages, openaiMsg)
+			continue
+		}
+
+		// ── 情形 B: user 消息，可能混合 text / image / tool_result ────────
+		var toolResultMsgs []model.Message
+		var regularContents []model.MessageContent
+		for _, c := range contents {
 			switch c.Type {
-			case "text":
-				contents = append(contents, model.MessageContent{
-					Type: model.ContentTypeText,
-					Text: c.Text,
+			case "tool_result":
+				// Anthropic tool_result → OpenAI role=tool
+				toolResultMsgs = append(toolResultMsgs, model.Message{
+					Role:       "tool",
+					Content:    c.Content,
+					ToolCallId: c.ToolUseId,
 				})
+			case "text":
+				if c.Text != "" {
+					regularContents = append(regularContents, model.MessageContent{
+						Type: model.ContentTypeText,
+						Text: c.Text,
+					})
+				}
 			case "image":
 				if c.Source != nil {
 					url := fmt.Sprintf("data:%s;base64,%s", c.Source.MediaType, c.Source.Data)
-					contents = append(contents, model.MessageContent{
+					regularContents = append(regularContents, model.MessageContent{
 						Type:     model.ContentTypeImageURL,
 						ImageURL: &model.ImageURL{Url: url},
 					})
 				}
 			}
 		}
-		if len(contents) == 1 && contents[0].Type == model.ContentTypeText {
+		if len(regularContents) == 1 && regularContents[0].Type == model.ContentTypeText {
 			openaiReq.Messages = append(openaiReq.Messages, model.Message{
-				Role:    msg.Role,
-				Content: contents[0].Text,
+				Role:    "user",
+				Content: regularContents[0].Text,
 			})
-		} else if len(contents) > 0 {
+		} else if len(regularContents) > 0 {
 			openaiReq.Messages = append(openaiReq.Messages, model.Message{
-				Role:    msg.Role,
-				Content: contents,
+				Role:    "user",
+				Content: regularContents,
 			})
 		}
+		// tool_result 消息紧跟 assistant 消息之后
+		openaiReq.Messages = append(openaiReq.Messages, toolResultMsgs...)
 	}
 
 	// tools
@@ -113,6 +163,27 @@ func anthropicNativeRequestToOpenAI(req *anthropic.Request) *model.GeneralOpenAI
 				},
 			},
 		})
+	}
+
+	// tool_choice: Anthropic → OpenAI 映射
+	if req.ToolChoice != nil {
+		if tc, ok := req.ToolChoice.(map[string]any); ok {
+			switch tc["type"] {
+			case "auto":
+				openaiReq.ToolChoice = "auto"
+			case "any":
+				openaiReq.ToolChoice = "required"
+			case "tool":
+				if name, ok := tc["name"].(string); ok {
+					openaiReq.ToolChoice = map[string]any{
+						"type":     "function",
+						"function": map[string]any{"name": name},
+					}
+				}
+			case "none":
+				openaiReq.ToolChoice = "none"
+			}
+		}
 	}
 
 	return openaiReq
@@ -132,18 +203,18 @@ func openAIStopReasonToAnthropic(reason string) string {
 }
 
 // openAIRespToAnthropic 将 OpenAI 非流式响应转换为 Anthropic 格式
-func openAIRespToAnthropic(resp *openai.TextResponse, modelName string) *anthropic.Response {
+func openAIRespToAnthropic(resp *openai.TextResponse, modelName string) *anthropicAdaptor.Response {
 	rawId := strings.TrimPrefix(resp.Id, "chatcmpl-")
 	if !strings.HasPrefix(rawId, "msg_") {
 		rawId = "msg_" + rawId
 	}
-	ar := &anthropic.Response{
+	ar := &anthropicAdaptor.Response{
 		Id:      rawId,
 		Type:    "message",
 		Role:    "assistant",
 		Model:   modelName,
-		Content: []anthropic.Content{},
-		Usage: anthropic.Usage{
+		Content: []anthropicAdaptor.Content{},
+		Usage: anthropicAdaptor.Usage{
 			InputTokens:  resp.Usage.PromptTokens,
 			OutputTokens: resp.Usage.CompletionTokens,
 		},
@@ -155,7 +226,7 @@ func openAIRespToAnthropic(resp *openai.TextResponse, modelName string) *anthrop
 				text = s
 			}
 			if text != "" {
-				ar.Content = append(ar.Content, anthropic.Content{Type: "text", Text: text})
+				ar.Content = append(ar.Content, anthropicAdaptor.Content{Type: "text", Text: text})
 			}
 		}
 		for _, tc := range choice.Message.ToolCalls {
@@ -163,7 +234,7 @@ func openAIRespToAnthropic(resp *openai.TextResponse, modelName string) *anthrop
 			if s, ok := tc.Function.Arguments.(string); ok {
 				_ = json.Unmarshal([]byte(s), &args)
 			}
-			ar.Content = append(ar.Content, anthropic.Content{
+			ar.Content = append(ar.Content, anthropicAdaptor.Content{
 				Type:  "tool_use",
 				Id:    tc.Id,
 				Name:  tc.Function.Name,
@@ -184,7 +255,7 @@ func RelayAnthropicHelper(c *gin.Context) *model.ErrorWithStatusCode {
 	m := meta.GetByContext(c)
 
 	// 解析 Anthropic 原生请求体
-	anthropicReq := &anthropic.Request{}
+	anthropicReq := &anthropicAdaptor.Request{}
 	if err := common.UnmarshalBodyReusable(c, anthropicReq); err != nil {
 		return openai.ErrorWrapper(err, "invalid_anthropic_request", http.StatusBadRequest)
 	}
@@ -312,6 +383,8 @@ func anthropicStreamRelay(c *gin.Context, resp *http.Response, promptTokens int)
 	defer resp.Body.Close()
 
 	scanner := bufio.NewScanner(resp.Body)
+	// 默认 64KB buffer 不足以处理大上下文（Claude Code 场景 system prompt 可达数百KB）
+	scanner.Buffer(make([]byte, 1024*1024), 10*1024*1024)
 	scanner.Split(func(data []byte, atEOF bool) (int, []byte, error) {
 		if atEOF && len(data) == 0 {
 			return 0, nil, nil
