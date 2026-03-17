@@ -289,6 +289,18 @@ func anthropicNonStreamRelay(c *gin.Context, resp *http.Response, modelName stri
 
 // anthropicStreamRelay 流式：将 OpenAI SSE 转换为 Anthropic SSE 格式输出
 // 若后端已返回 Anthropic 格式 SSE，则直接透传
+// renderAnthropicEvent 输出带 event: 字段的标准 Anthropic SSE 事件
+// Anthropic SDK 依赖 event: 字段来识别事件类型
+func renderAnthropicEvent(c *gin.Context, eventType string, data any) {
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return
+	}
+	c.Render(-1, common.CustomEvent{Data: "event: " + eventType})
+	c.Render(-1, common.CustomEvent{Data: "data: " + string(jsonData)})
+	c.Writer.Flush()
+}
+
 func anthropicStreamRelay(c *gin.Context, resp *http.Response, promptTokens int) (*model.Usage, *model.ErrorWithStatusCode) {
 	common.SetEventStreamHeaders(c)
 	defer resp.Body.Close()
@@ -440,7 +452,7 @@ func anthropicStreamRelay(c *gin.Context, resp *http.Response, promptTokens int)
 		usage.CompletionTokens = completionTokens
 	}
 	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
-	_ = render.ObjectData(c, map[string]any{"type": "message_stop"})
+	renderAnthropicEvent(c, "message_stop", map[string]any{"type": "message_stop"})
 	render.Done(c)
 	return &usage, nil
 }
