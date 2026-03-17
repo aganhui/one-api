@@ -46,6 +46,9 @@ func getRequestModel(c *gin.Context) (string, error) {
 			modelRequest.Model = "whisper-1"
 		}
 	}
+	if strings.HasPrefix(c.Request.URL.Path, "/v1/messages") {
+		// Anthropic native format: model is top-level field, already parsed above
+	}
 	return modelRequest.Model, nil
 }
 

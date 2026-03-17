@@ -131,6 +131,66 @@ func processChannelRelayError(ctx context.Context, userId int, channelId int, ch
 	}
 }
 
+func RelayAnthropic(c *gin.Context) {
+	ctx := c.Request.Context()
+	if config.DebugEnabled {
+		requestBody, _ := common.GetRequestBody(c)
+		logger.Debugf(ctx, "request body: %s", string(requestBody))
+	}
+	channelId := c.GetInt(ctxkey.ChannelId)
+	userId := c.GetInt(ctxkey.Id)
+	bizErr := controller.RelayAnthropicHelper(c)
+	if bizErr == nil {
+		monitor.Emit(channelId, true)
+		return
+	}
+	lastFailedChannelId := channelId
+	channelName := c.GetString(ctxkey.ChannelName)
+	group := c.GetString(ctxkey.Group)
+	originalModel := c.GetString(ctxkey.OriginalModel)
+	go processChannelRelayError(ctx, userId, channelId, channelName, *bizErr)
+	requestId := c.GetString(helper.RequestIdKey)
+	retryTimes := config.RetryTimes
+	if !shouldRetry(c, bizErr.StatusCode) {
+		logger.Errorf(ctx, "relay error happen, status code is %d, won't retry in this case", bizErr.StatusCode)
+		retryTimes = 0
+	}
+	for i := retryTimes; i > 0; i-- {
+		channel, err := dbmodel.CacheGetRandomSatisfiedChannel(group, originalModel, i != retryTimes)
+		if err != nil {
+			logger.Errorf(ctx, "CacheGetRandomSatisfiedChannel failed: %+v", err)
+			break
+		}
+		logger.Infof(ctx, "using channel #%d to retry (remain times %d)", channel.Id, i)
+		if channel.Id == lastFailedChannelId {
+			continue
+		}
+		middleware.SetupContextForSelectedChannel(c, channel, originalModel)
+		requestBody, err := common.GetRequestBody(c)
+		c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
+		bizErr = controller.RelayAnthropicHelper(c)
+		if bizErr == nil {
+			return
+		}
+		channelId := c.GetInt(ctxkey.ChannelId)
+		lastFailedChannelId = channelId
+		channelName := c.GetString(ctxkey.ChannelName)
+		go processChannelRelayError(ctx, userId, channelId, channelName, *bizErr)
+	}
+	if bizErr != nil {
+		if bizErr.StatusCode == http.StatusTooManyRequests {
+			bizErr.Error.Message = "当前分组上游负载已饱和，请稍后再试"
+		}
+		bizErr.Error.Message = helper.MessageWithRequestId(bizErr.Error.Message, requestId)
+		c.JSON(bizErr.StatusCode, gin.H{
+			"error": gin.H{
+				"type":    bizErr.Error.Type,
+				"message": bizErr.Error.Message,
+			},
+		})
+	}
+}
+
 func RelayNotImplemented(c *gin.Context) {
 	err := model.Error{
 		Message: "API not implemented",

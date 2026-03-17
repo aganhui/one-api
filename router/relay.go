@@ -17,6 +17,13 @@ func SetRelayRouter(router *gin.Engine) {
 		modelsRouter.GET("", controller.ListModels)
 		modelsRouter.GET("/:model", controller.RetrieveModel)
 	}
+	// Anthropic-native format endpoint
+	anthropicRouter := router.Group("/v1")
+	anthropicRouter.Use(middleware.RelayPanicRecover(), middleware.AnthropicAuth(), middleware.Distribute())
+	{
+		anthropicRouter.POST("/messages", controller.RelayAnthropic)
+	}
+
 	relayV1Router := router.Group("/v1")
 	relayV1Router.Use(middleware.RelayPanicRecover(), middleware.TokenAuth(), middleware.Distribute())
 	{

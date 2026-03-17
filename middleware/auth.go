@@ -150,6 +150,67 @@ func TokenAuth() func(c *gin.Context) {
 	}
 }
 
+// AnthropicAuth 支持以 x-api-key 或 Bearer Authorization 方式鉴权的 Anthropic 原生格式接口
+func AnthropicAuth() func(c *gin.Context) {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		// 优先读取 x-api-key，其次 Authorization Bearer
+		key := c.Request.Header.Get("x-api-key")
+		if key == "" {
+			key = c.Request.Header.Get("Authorization")
+			key = strings.TrimPrefix(key, "Bearer ")
+		}
+		key = strings.TrimPrefix(key, "sk-")
+		parts := strings.Split(key, "-")
+		key = parts[0]
+		token, err := model.ValidateUserToken(key)
+		if err != nil {
+			abortWithMessage(c, http.StatusUnauthorized, err.Error())
+			return
+		}
+		if token.Subnet != nil && *token.Subnet != "" {
+			if !network.IsIpInSubnets(ctx, c.ClientIP(), *token.Subnet) {
+				abortWithMessage(c, http.StatusForbidden, fmt.Sprintf("该令牌只能在指定网段使用：%s，当前 ip：%s", *token.Subnet, c.ClientIP()))
+				return
+			}
+		}
+		userEnabled, err := model.CacheIsUserEnabled(token.UserId)
+		if err != nil {
+			abortWithMessage(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if !userEnabled || blacklist.IsUserBanned(token.UserId) {
+			abortWithMessage(c, http.StatusForbidden, "用户已被封禁")
+			return
+		}
+		requestModel, err := getRequestModel(c)
+		if err != nil {
+			abortWithMessage(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		c.Set(ctxkey.RequestModel, requestModel)
+		if token.Models != nil && *token.Models != "" {
+			c.Set(ctxkey.AvailableModels, *token.Models)
+			if requestModel != "" && !isModelInList(requestModel, *token.Models) {
+				abortWithMessage(c, http.StatusForbidden, fmt.Sprintf("该令牌无权使用模型：%s", requestModel))
+				return
+			}
+		}
+		c.Set(ctxkey.Id, token.UserId)
+		c.Set(ctxkey.TokenId, token.Id)
+		c.Set(ctxkey.TokenName, token.Name)
+		if len(parts) > 1 {
+			if model.IsAdmin(token.UserId) {
+				c.Set(ctxkey.SpecificChannelId, parts[1])
+			} else {
+				abortWithMessage(c, http.StatusForbidden, "普通用户不支持指定渠道")
+				return
+			}
+		}
+		c.Next()
+	}
+}
+
 func shouldCheckModel(c *gin.Context) bool {
 	if strings.HasPrefix(c.Request.URL.Path, "/v1/completions") {
 		return true
@@ -161,6 +222,9 @@ func shouldCheckModel(c *gin.Context) bool {
 		return true
 	}
 	if strings.HasPrefix(c.Request.URL.Path, "/v1/audio") {
+		return true
+	}
+	if strings.HasPrefix(c.Request.URL.Path, "/v1/messages") {
 		return true
 	}
 	return false
