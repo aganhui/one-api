@@ -357,7 +357,6 @@ func anthropicStreamRelay(c *gin.Context, resp *http.Response, promptTokens int)
 		}
 
 		if isAnthropicFormat {
-			// 直接透传，但修正 message_start 里的 input_tokens
 			var event map[string]any
 			if err := json.Unmarshal([]byte(data), &event); err != nil {
 				render.StringData(c, "data: "+data)
@@ -366,7 +365,6 @@ func anthropicStreamRelay(c *gin.Context, resp *http.Response, promptTokens int)
 			eventType, _ := event["type"].(string)
 			switch eventType {
 			case "message_start":
-				// 用本机计算的 promptTokens 覆盖
 				if msg, ok := event["message"].(map[string]any); ok {
 					if u, ok := msg["usage"].(map[string]any); ok {
 						u["input_tokens"] = promptTokens
@@ -376,12 +374,11 @@ func anthropicStreamRelay(c *gin.Context, resp *http.Response, promptTokens int)
 				if delta, ok := event["delta"].(map[string]any); ok {
 					if delta["type"] == "text_delta" {
 						if t, ok := delta["text"].(string); ok {
-							completionTokens += len(strings.Fields(t)) // 粗略估算
+							completionTokens += len(strings.Fields(t))
 						}
 					}
 				}
 			case "message_delta":
-				// 修正 usage
 				if u, ok := event["usage"].(map[string]any); ok {
 					if outTok, ok := u["output_tokens"].(float64); ok && outTok > 0 {
 						usage.CompletionTokens = int(outTok)
@@ -389,12 +386,11 @@ func anthropicStreamRelay(c *gin.Context, resp *http.Response, promptTokens int)
 						u["output_tokens"] = completionTokens
 						usage.CompletionTokens = completionTokens
 					}
-					u["input_tokens"] = promptTokens
+					delete(u, "input_tokens")
 				}
 			}
-			_ = render.ObjectData(c, event)
+			renderAnthropicEvent(c, eventType, event)
 		} else {
-			// OpenAI SSE 格式，转换为 Anthropic
 			var chunk openai.ChatCompletionsStreamResponse
 			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 				logger.SysError("unmarshal stream chunk failed: " + err.Error())
@@ -404,7 +400,7 @@ func anthropicStreamRelay(c *gin.Context, resp *http.Response, promptTokens int)
 				started = true
 				msgId = strings.TrimPrefix(chunk.Id, "chatcmpl-")
 				modelName = chunk.Model
-				_ = render.ObjectData(c, map[string]any{
+				renderAnthropicEvent(c, "message_start", map[string]any{
 					"type": "message_start",
 					"message": map[string]any{
 						"id": msgId, "type": "message", "role": "assistant",
@@ -413,7 +409,7 @@ func anthropicStreamRelay(c *gin.Context, resp *http.Response, promptTokens int)
 						"usage": map[string]any{"input_tokens": promptTokens, "output_tokens": 0},
 					},
 				})
-				_ = render.ObjectData(c, map[string]any{
+				renderAnthropicEvent(c, "content_block_start", map[string]any{
 					"type": "content_block_start", "index": index,
 					"content_block": map[string]any{"type": "text", "text": ""},
 				})
@@ -421,20 +417,20 @@ func anthropicStreamRelay(c *gin.Context, resp *http.Response, promptTokens int)
 			for _, choice := range chunk.Choices {
 				if text, ok := choice.Delta.Content.(string); ok && text != "" {
 					completionTokens++
-					_ = render.ObjectData(c, map[string]any{
+					renderAnthropicEvent(c, "content_block_delta", map[string]any{
 						"type": "content_block_delta", "index": index,
 						"delta": map[string]any{"type": "text_delta", "text": text},
 					})
 				}
 				if choice.FinishReason != nil && *choice.FinishReason != "" && *choice.FinishReason != "null" {
 					sr := openAIStopReasonToAnthropic(*choice.FinishReason)
-					_ = render.ObjectData(c, map[string]any{
+					renderAnthropicEvent(c, "content_block_stop", map[string]any{
 						"type": "content_block_stop", "index": index,
 					})
-					_ = render.ObjectData(c, map[string]any{
+					renderAnthropicEvent(c, "message_delta", map[string]any{
 						"type": "message_delta",
 						"delta": map[string]any{"stop_reason": sr, "stop_sequence": nil},
-						"usage": map[string]any{"input_tokens": promptTokens, "output_tokens": completionTokens},
+						"usage": map[string]any{"output_tokens": completionTokens},
 					})
 				}
 			}
