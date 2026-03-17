@@ -32,11 +32,15 @@ func (a *Adaptor) ConvertRequest(c *gin.Context, relayMode int, request *model.G
 	}
 
 	claudeReq := anthropic.ConvertRequest(*request)
+	var systemStr string
+	if s, ok := claudeReq.System.(string); ok {
+		systemStr = s
+	}
 	req := Request{
 		AnthropicVersion: anthropicVersion,
 		// Model:            claudeReq.Model,
 		Messages:    claudeReq.Messages,
-		System:      claudeReq.System,
+		System:      systemStr,
 		MaxTokens:   claudeReq.MaxTokens,
 		Temperature: claudeReq.Temperature,
 		TopP:        claudeReq.TopP,

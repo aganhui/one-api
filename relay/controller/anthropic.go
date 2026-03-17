@@ -23,6 +23,31 @@ import (
 	"github.com/songquanpeng/one-api/relay/relaymode"
 )
 
+// parseAnthropicSystem 解析 system 字段，支持字符串和数组两种格式
+func parseAnthropicSystem(system any) string {
+	if system == nil {
+		return ""
+	}
+	switch v := system.(type) {
+	case string:
+		return v
+	case []any:
+		// [{"type":"text","text":"..."}]
+		var parts []string
+		for _, item := range v {
+			if m, ok := item.(map[string]any); ok {
+				if m["type"] == "text" {
+					if t, ok := m["text"].(string); ok {
+						parts = append(parts, t)
+					}
+				}
+			}
+		}
+		return strings.Join(parts, "\n")
+	}
+	return ""
+}
+
 // anthropicNativeRequestToOpenAI 将 Anthropic 原生请求转为 OpenAI 通用格式
 func anthropicNativeRequestToOpenAI(req *anthropic.Request) *model.GeneralOpenAIRequest {
 	openaiReq := &model.GeneralOpenAIRequest{
@@ -34,10 +59,10 @@ func anthropicNativeRequestToOpenAI(req *anthropic.Request) *model.GeneralOpenAI
 	}
 
 	// system prompt
-	if req.System != "" {
+	if systemText := parseAnthropicSystem(req.System); systemText != "" {
 		openaiReq.Messages = append(openaiReq.Messages, model.Message{
 			Role:    "system",
-			Content: req.System,
+			Content: systemText,
 		})
 	}
 

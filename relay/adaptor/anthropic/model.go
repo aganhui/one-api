@@ -44,7 +44,7 @@ type InputSchema struct {
 type Request struct {
 	Model         string    `json:"model"`
 	Messages      []Message `json:"messages"`
-	System        string    `json:"system,omitempty"`
+	System        any       `json:"system,omitempty"` // string 或 []Content
 	MaxTokens     int       `json:"max_tokens,omitempty"`
 	StopSequences []string  `json:"stop_sequences,omitempty"`
 	Stream        bool      `json:"stream,omitempty"`
