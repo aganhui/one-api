@@ -133,8 +133,12 @@ func openAIStopReasonToAnthropic(reason string) string {
 
 // openAIRespToAnthropic 将 OpenAI 非流式响应转换为 Anthropic 格式
 func openAIRespToAnthropic(resp *openai.TextResponse, modelName string) *anthropic.Response {
+	rawId := strings.TrimPrefix(resp.Id, "chatcmpl-")
+	if !strings.HasPrefix(rawId, "msg_") {
+		rawId = "msg_" + rawId
+	}
 	ar := &anthropic.Response{
-		Id:    strings.TrimPrefix(resp.Id, "chatcmpl-"),
+		Id:    rawId,
 		Type:  "message",
 		Role:  "assistant",
 		Model: modelName,
@@ -329,6 +333,7 @@ func anthropicStreamRelay(c *gin.Context, resp *http.Response, promptTokens int)
 	isAnthropicFormat := false
 	formatDetected := false
 	started := false
+	blockStopped := false
 	index := 0
 	var msgId, modelName string
 
@@ -399,7 +404,11 @@ func anthropicStreamRelay(c *gin.Context, resp *http.Response, promptTokens int)
 			}
 			if !started {
 				started = true
-				msgId = strings.TrimPrefix(chunk.Id, "chatcmpl-")
+				rawId := strings.TrimPrefix(chunk.Id, "chatcmpl-")
+				if !strings.HasPrefix(rawId, "msg_") {
+					rawId = "msg_" + rawId
+				}
+				msgId = rawId
 				modelName = chunk.Model
 				renderAnthropicEvent(c, "message_start", map[string]any{
 					"type": "message_start",
@@ -425,6 +434,7 @@ func anthropicStreamRelay(c *gin.Context, resp *http.Response, promptTokens int)
 				}
 				if choice.FinishReason != nil && *choice.FinishReason != "" && *choice.FinishReason != "null" {
 					sr := openAIStopReasonToAnthropic(*choice.FinishReason)
+					blockStopped = true
 					renderAnthropicEvent(c, "content_block_stop", map[string]any{
 						"type": "content_block_stop", "index": index,
 					})
@@ -445,11 +455,21 @@ func anthropicStreamRelay(c *gin.Context, resp *http.Response, promptTokens int)
 	if err := scanner.Err(); err != nil {
 		logger.SysError("error reading stream: " + err.Error())
 	}
+	// 若流结束时未收到 finish_reason，补发 content_block_stop 和 message_delta
+	if started && !blockStopped {
+		renderAnthropicEvent(c, "content_block_stop", map[string]any{
+			"type": "content_block_stop", "index": index,
+		})
+		renderAnthropicEvent(c, "message_delta", map[string]any{
+			"type": "message_delta",
+			"delta": map[string]any{"stop_reason": "end_turn", "stop_sequence": nil},
+			"usage": map[string]any{"output_tokens": completionTokens},
+		})
+	}
 	if usage.CompletionTokens == 0 {
 		usage.CompletionTokens = completionTokens
 	}
 	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 	renderAnthropicEvent(c, "message_stop", map[string]any{"type": "message_stop"})
-	render.Done(c)
 	return &usage, nil
 }
