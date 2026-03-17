@@ -1,0 +1,64 @@
+data: {"id":"chatcmpl-a09086b3","object":"chat.completion.chunk","created":1773658799,"model":"claude-4.6-opus-high-thinking","choices":[{"index":0,"delta":{"role":"assistant"}}]}
+
+data: {"choices":[{"delta":{"content":"","role":"assistant"},"finish_reason":null,"index":0}],"created":1773658799,"id":"chatcmpl-a09086b3","model":"claude-4.6-opus-high-thinking","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"明"},"finish_reason":null,"index":0}],"created":1773658799,"id":"chatcmpl-a09086b3","model":"claude-4.6-opus-high-thinking","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"白了。"},"finish_reason":null,"index":0}],"created":1773658799,"id":"chatcmpl-a09086b3","model":"claude-4.6-opus-high-thinking","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"我已"},"finish_reason":null,"index":0}],"created":1773658799,"id":"chatcmpl-a09086b3","model":"claude-4.6-opus-high-thinking","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"准"},"finish_reason":null,"index":0}],"created":1773658799,"id":"chatcmpl-a09086b3","model":"claude-4.6-opus-high-thinking","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"备好帮助"},"finish_reason":null,"index":0}],"created":1773658799,"id":"chatcmpl-a09086b3","model":"claude-4.6-opus-high-thinking","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"你。"},"finish_reason":null,"index":0}],"created":1773658799,"id":"chatcmpl-a09086b3","model":"claude-4.6-opus-high-thinking","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"请"},"finish_reason":null,"index":0}],"created":1773658799,"id":"chatcmpl-a09086b3","model":"claude-4.6-opus-high-thinking","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"告诉我你需"},"finish_reason":null,"index":0}],"created":1773658799,"id":"chatcmpl-a09086b3","model":"claude-4.6-opus-high-thinking","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"要做"},"finish_reason":null,"index":0}],"created":1773658799,"id":"chatcmpl-a09086b3","model":"claude-4.6-opus-high-thinking","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"什么，比"},"finish_reason":null,"index":0}],"created":1773658799,"id":"chatcmpl-a09086b3","model":"claude-4.6-opus-high-thinking","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"如：\n\n-"},"finish_reason":null,"index":0}],"created":1773658799,"id":"chatcmpl-a09086b3","model":"claude-4.6-opus-high-thinking","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":" 修"},"finish_reason":null,"index":0}],"created":1773658799,"id":"chatcmpl-a09086b3","model":"claude-4.6-opus-high-thinking","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"复代"},"finish_reason":null,"index":0}],"created":1773658799,"id":"chatcmpl-a09086b3","model":"claude-4.6-opus-high-thinking","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"码中的问"},"finish_reason":null,"index":0}],"created":1773658799,"id":"chatcmpl-a09086b3","model":"claude-4.6-opus-high-thinking","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"题\n- 添"},"finish_reason":null,"index":0}],"created":1773658799,"id":"chatcmpl-a09086b3","model":"claude-4.6-opus-high-thinking","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"加新功能\n- 理"},"finish_reason":null,"index":0}],"created":1773658799,"id":"chatcmpl-a09086b3","model":"claude-4.6-opus-high-thinking","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"解现"},"finish_reason":null,"index":0}],"created":1773658799,"id":"chatcmpl-a09086b3","model":"claude-4.6-opus-high-thinking","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"有代码\n- 调试"},"finish_reason":null,"index":0}],"created":1773658799,"id":"chatcmpl-a09086b3","model":"claude-4.6-opus-high-thinking","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"程"},"finish_reason":null,"index":0}],"created":1773658799,"id":"chatcmpl-a09086b3","model":"claude-4.6-opus-high-thinking","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"序\n- 或"},"finish_reason":null,"index":0}],"created":1773658799,"id":"chatcmpl-a09086b3","model":"claude-4.6-opus-high-thinking","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"其"},"finish_reason":null,"index":0}],"created":1773658799,"id":"chatcmpl-a09086b3","model":"claude-4.6-opus-high-thinking","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"他编"},"finish_reason":null,"index":0}],"created":1773658799,"id":"chatcmpl-a09086b3","model":"claude-4.6-opus-high-thinking","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"程相"},"finish_reason":null,"index":0}],"created":1773658799,"id":"chatcmpl-a09086b3","model":"claude-4.6-opus-high-thinking","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"关的任务\n\n我"},"finish_reason":null,"index":0}],"created":1773658799,"id":"chatcmpl-a09086b3","model":"claude-4.6-opus-high-thinking","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"会根"},"finish_reason":null,"index":0}],"created":1773658799,"id":"chatcmpl-a09086b3","model":"claude-4.6-opus-high-thinking","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"据你的需求来"},"finish_reason":null,"index":0}],"created":1773658799,"id":"chatcmpl-a09086b3","model":"claude-4.6-opus-high-thinking","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"协"},"finish_reason":null,"index":0}],"created":1773658799,"id":"chatcmpl-a09086b3","model":"claude-4.6-opus-high-thinking","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"助你。"},"finish_reason":null,"index":0}],"created":1773658799,"id":"chatcmpl-a09086b3","model":"claude-4.6-opus-high-thinking","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{},"finish_reason":"stop","index":0}],"created":1773658799,"id":"chatcmpl-a09086b3","model":"claude-4.6-opus-high-thinking","object":"chat.completion.chunk","usage":{"completion_tokens":71,"prompt_tokens":684,"total_tokens":755}}
+
+data: [DONE]
+

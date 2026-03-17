@@ -1,0 +1,14 @@
+http://43.242.200.6:3001/v1/chat/completions
+http://43.242.200.8:3001/v1/chat/completions
+http://43.242.200.119:3001/v1/chat/completions
+http://43.242.200.48:3001/v1/chat/completions
+http://149.88.92.191:3001/v1/chat/completions
+http://149.88.92.227:3001/v1/chat/completions
+http://43.242.200.55:3001/v1/chat/completions
+http://154.37.218.149:3001/v1/chat/completions
+http://154.37.218.149:3000/v1/chat/completions
+http://154.37.218.131:3001/v1/chat/completions
+http://154.37.218.131:3000/v1/chat/completions
+http://154.44.31.38:3000/v1/chat/completions
+http://154.44.31.38:3001/v1/chat/completions
+http://154.44.31.38:3002/v1/chat/completions

@@ -1,0 +1,3 @@
+gpt-5.4-medium
+claude-4.6-opus-high-thinking
+claude-4.6-sonnet-medium-thinking

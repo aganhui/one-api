@@ -1,0 +1,6 @@
+{
+  "http://43.242.200.119:3001/v1/chat/completions": {
+    "success": 1,
+    "failure": 0
+  }
+}

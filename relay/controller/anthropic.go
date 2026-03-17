@@ -238,7 +238,7 @@ func RelayAnthropicHelper(c *gin.Context) *model.ErrorWithStatusCode {
 	var usage *model.Usage
 	var respErr *model.ErrorWithStatusCode
 	if anthropicReq.Stream {
-		usage, respErr = anthropicStreamRelay(c, resp)
+		usage, respErr = anthropicStreamRelay(c, resp, m.PromptTokens)
 	} else {
 		usage, respErr = anthropicNonStreamRelay(c, resp, actualModel)
 	}
@@ -288,7 +288,7 @@ func anthropicNonStreamRelay(c *gin.Context, resp *http.Response, modelName stri
 }
 
 // anthropicStreamRelay 流式：将 OpenAI SSE 转换为 Anthropic SSE 格式输出
-func anthropicStreamRelay(c *gin.Context, resp *http.Response) (*model.Usage, *model.ErrorWithStatusCode) {
+func anthropicStreamRelay(c *gin.Context, resp *http.Response, promptTokens int) (*model.Usage, *model.ErrorWithStatusCode) {
 	common.SetEventStreamHeaders(c)
 	defer resp.Body.Close()
 
@@ -337,7 +337,7 @@ func anthropicStreamRelay(c *gin.Context, resp *http.Response) (*model.Usage, *m
 					"id": msgId, "type": "message", "role": "assistant",
 					"model": modelName, "content": []any{},
 					"stop_reason": nil, "stop_sequence": nil,
-					"usage": map[string]any{"input_tokens": 0, "output_tokens": 0},
+					"usage": map[string]any{"input_tokens": promptTokens, "output_tokens": 0},
 				},
 			})
 			// content_block_start
@@ -366,7 +366,7 @@ func anthropicStreamRelay(c *gin.Context, resp *http.Response) (*model.Usage, *m
 					"delta": map[string]any{
 						"stop_reason": sr, "stop_sequence": nil,
 					},
-					"usage": map[string]any{"output_tokens": usage.CompletionTokens},
+					"usage": map[string]any{"input_tokens": promptTokens, "output_tokens": usage.CompletionTokens},
 				})
 			}
 		}
