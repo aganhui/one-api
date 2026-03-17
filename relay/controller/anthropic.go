@@ -138,10 +138,11 @@ func openAIRespToAnthropic(resp *openai.TextResponse, modelName string) *anthrop
 		rawId = "msg_" + rawId
 	}
 	ar := &anthropic.Response{
-		Id:    rawId,
-		Type:  "message",
-		Role:  "assistant",
-		Model: modelName,
+		Id:      rawId,
+		Type:    "message",
+		Role:    "assistant",
+		Model:   modelName,
+		Content: []anthropic.Content{},
 		Usage: anthropic.Usage{
 			InputTokens:  resp.Usage.PromptTokens,
 			OutputTokens: resp.Usage.CompletionTokens,
@@ -334,6 +335,7 @@ func anthropicStreamRelay(c *gin.Context, resp *http.Response, promptTokens int)
 	formatDetected := false
 	started := false
 	blockStopped := false
+	passthroughMessageStop := false
 	index := 0
 	var msgId, modelName string
 
@@ -373,9 +375,21 @@ func anthropicStreamRelay(c *gin.Context, resp *http.Response, promptTokens int)
 			case "message_start":
 				if msg, ok := event["message"].(map[string]any); ok {
 					if u, ok := msg["usage"].(map[string]any); ok {
+						// 保留后端返回的 cache_creation_input_tokens / cache_read_input_tokens 等字段
+						// Claude Code SDK 对 usage 结构有严格校验，缺失 cache 字段会导致解析失败
 						u["input_tokens"] = promptTokens
+						if _, ok := u["cache_creation_input_tokens"]; !ok {
+							u["cache_creation_input_tokens"] = 0
+						}
+						if _, ok := u["cache_read_input_tokens"]; !ok {
+							u["cache_read_input_tokens"] = 0
+						}
 					}
 				}
+				renderAnthropicEvent(c, "message_start", event)
+				// 若上游未发送 ping，主动补发，Claude Code SDK 依赖此心跳确认连接就绪
+				renderAnthropicEvent(c, "ping", map[string]any{"type": "ping"})
+				continue
 			case "content_block_delta":
 				if delta, ok := event["delta"].(map[string]any); ok {
 					if delta["type"] == "text_delta" {
@@ -394,6 +408,11 @@ func anthropicStreamRelay(c *gin.Context, resp *http.Response, promptTokens int)
 					}
 					delete(u, "input_tokens")
 				}
+			case "ping":
+				// ping 事件直接透传，无需修改
+			case "message_stop":
+				// 后端已发送 message_stop，标记不再重复发送
+				passthroughMessageStop = true
 			}
 			renderAnthropicEvent(c, eventType, event)
 		} else {
@@ -416,9 +435,16 @@ func anthropicStreamRelay(c *gin.Context, resp *http.Response, promptTokens int)
 						"id": msgId, "type": "message", "role": "assistant",
 						"model": modelName, "content": []any{},
 						"stop_reason": nil, "stop_sequence": nil,
-						"usage": map[string]any{"input_tokens": promptTokens, "output_tokens": 0},
+						"usage": map[string]any{
+							"input_tokens":                promptTokens,
+							"output_tokens":               0,
+							"cache_creation_input_tokens": 0,
+							"cache_read_input_tokens":     0,
+						},
 					},
 				})
+				// Claude Code SDK 期望在 message_start 之后收到 ping 心跳
+				renderAnthropicEvent(c, "ping", map[string]any{"type": "ping"})
 				renderAnthropicEvent(c, "content_block_start", map[string]any{
 					"type": "content_block_start", "index": index,
 					"content_block": map[string]any{"type": "text", "text": ""},
@@ -470,6 +496,9 @@ func anthropicStreamRelay(c *gin.Context, resp *http.Response, promptTokens int)
 		usage.CompletionTokens = completionTokens
 	}
 	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
-	renderAnthropicEvent(c, "message_stop", map[string]any{"type": "message_stop"})
+	// 仅在 OpenAI 转换模式下补发 message_stop（透传模式后端已发送过）
+	if !passthroughMessageStop {
+		renderAnthropicEvent(c, "message_stop", map[string]any{"type": "message_stop"})
+	}
 	return &usage, nil
 }
