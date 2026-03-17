@@ -1,5 +1,7 @@
 package anthropic
 
+import "strings"
+
 // https://docs.anthropic.com/claude/reference/messages_post
 
 type Metadata struct {
@@ -25,8 +27,79 @@ type Content struct {
 }
 
 type Message struct {
-	Role    string    `json:"role"`
-	Content []Content `json:"content"`
+	Role    string `json:"role"`
+	Content any    `json:"content"` // string 或 []Content
+}
+
+// StringContent 将 content 统一转为字符串
+func (m Message) StringContent() string {
+	switch v := m.Content.(type) {
+	case string:
+		return v
+	case []any:
+		var parts []string
+		for _, item := range v {
+			if mp, ok := item.(map[string]any); ok {
+				if mp["type"] == "text" {
+					if t, ok := mp["text"].(string); ok {
+						parts = append(parts, t)
+					}
+				}
+			}
+		}
+		return strings.Join(parts, "")
+	}
+	return ""
+}
+
+// ParseContents 将 content 解析为 []Content
+func (m Message) ParseContents() []Content {
+	switch v := m.Content.(type) {
+	case string:
+		return []Content{{Type: "text", Text: v}}
+	case []any:
+		var contents []Content
+		for _, item := range v {
+			mp, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			c := Content{}
+			if t, ok := mp["type"].(string); ok {
+				c.Type = t
+			}
+			if t, ok := mp["text"].(string); ok {
+				c.Text = t
+			}
+			if id, ok := mp["id"].(string); ok {
+				c.Id = id
+			}
+			if name, ok := mp["name"].(string); ok {
+				c.Name = name
+			}
+			if toolUseId, ok := mp["tool_use_id"].(string); ok {
+				c.ToolUseId = toolUseId
+			}
+			if content, ok := mp["content"].(string); ok {
+				c.Content = content
+			}
+			if src, ok := mp["source"].(map[string]any); ok {
+				c.Source = &ImageSource{}
+				if t, ok := src["type"].(string); ok {
+					c.Source.Type = t
+				}
+				if mt, ok := src["media_type"].(string); ok {
+					c.Source.MediaType = mt
+				}
+				if d, ok := src["data"].(string); ok {
+					c.Source.Data = d
+				}
+			}
+			contents = append(contents, c)
+		}
+		return contents
+	}
+	return nil
 }
 
 type Tool struct {

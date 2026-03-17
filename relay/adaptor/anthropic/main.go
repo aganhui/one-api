@@ -96,6 +96,7 @@ func ConvertRequest(textRequest model.GeneralOpenAIRequest) *Request {
 		claudeMessage := Message{
 			Role: message.Role,
 		}
+		var claudeContents []Content
 		var content Content
 		if message.IsStringContent() {
 			content.Type = "text"
@@ -107,21 +108,21 @@ func ConvertRequest(textRequest model.GeneralOpenAIRequest) *Request {
 				content.Text = ""
 				content.ToolUseId = message.ToolCallId
 			}
-			claudeMessage.Content = append(claudeMessage.Content, content)
+			claudeContents = append(claudeContents, content)
 			for i := range message.ToolCalls {
 				inputParam := make(map[string]any)
 				_ = json.Unmarshal([]byte(message.ToolCalls[i].Function.Arguments.(string)), &inputParam)
-				claudeMessage.Content = append(claudeMessage.Content, Content{
+				claudeContents = append(claudeContents, Content{
 					Type:  "tool_use",
 					Id:    message.ToolCalls[i].Id,
 					Name:  message.ToolCalls[i].Function.Name,
 					Input: inputParam,
 				})
 			}
+			claudeMessage.Content = claudeContents
 			claudeRequest.Messages = append(claudeRequest.Messages, claudeMessage)
 			continue
 		}
-		var contents []Content
 		openaiContent := message.ParseContent()
 		for _, part := range openaiContent {
 			var content Content
@@ -137,9 +138,9 @@ func ConvertRequest(textRequest model.GeneralOpenAIRequest) *Request {
 				content.Source.MediaType = mimeType
 				content.Source.Data = data
 			}
-			contents = append(contents, content)
+			claudeContents = append(claudeContents, content)
 		}
-		claudeMessage.Content = contents
+		claudeMessage.Content = claudeContents
 		claudeRequest.Messages = append(claudeRequest.Messages, claudeMessage)
 	}
 	return &claudeRequest

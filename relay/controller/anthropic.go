@@ -69,7 +69,7 @@ func anthropicNativeRequestToOpenAI(req *anthropic.Request) *model.GeneralOpenAI
 	// messages
 	for _, msg := range req.Messages {
 		var contents []model.MessageContent
-		for _, c := range msg.Content {
+		for _, c := range msg.ParseContents() {
 			switch c.Type {
 			case "text":
 				contents = append(contents, model.MessageContent{
@@ -270,11 +270,21 @@ func anthropicNonStreamRelay(c *gin.Context, resp *http.Response, modelName stri
 	c.Writer.Header().Set("Content-Type", "application/json")
 	c.Writer.WriteHeader(http.StatusOK)
 	_, _ = c.Writer.Write(jsonResp)
-	return &model.Usage{
+	usage := &model.Usage{
 		PromptTokens:     openaiResp.Usage.PromptTokens,
 		CompletionTokens: openaiResp.Usage.CompletionTokens,
 		TotalTokens:      openaiResp.Usage.TotalTokens,
-	}, nil
+	}
+	// 若后端未返回 usage，用本地 token 计数估算（与 openai.Handler 保持一致）
+	if usage.TotalTokens == 0 || (usage.PromptTokens == 0 && usage.CompletionTokens == 0) {
+		completionTokens := 0
+		for _, choice := range openaiResp.Choices {
+			completionTokens += openai.CountTokenText(choice.Message.StringContent(), modelName)
+		}
+		usage.CompletionTokens = completionTokens
+		usage.TotalTokens = usage.PromptTokens + completionTokens
+	}
+	return usage, nil
 }
 
 // anthropicStreamRelay 流式：将 OpenAI SSE 转换为 Anthropic SSE 格式输出
@@ -370,6 +380,10 @@ func anthropicStreamRelay(c *gin.Context, resp *http.Response) (*model.Usage, *m
 
 	if err := scanner.Err(); err != nil {
 		logger.SysError("error reading stream: " + err.Error())
+	}
+	// 若后端未返回 usage，用提示词 token 数补全
+	if usage.TotalTokens == 0 || (usage.PromptTokens == 0 && usage.CompletionTokens == 0) {
+		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 	}
 	// message_stop
 	_ = render.ObjectData(c, map[string]any{"type": "message_stop"})
