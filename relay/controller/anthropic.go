@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/songquanpeng/one-api/common"
+	"github.com/songquanpeng/one-api/common/helper"
 	"github.com/songquanpeng/one-api/common/logger"
 	"github.com/songquanpeng/one-api/common/render"
 	relayrelay "github.com/songquanpeng/one-api/relay"
@@ -367,6 +368,12 @@ func anthropicNonStreamRelay(c *gin.Context, resp *http.Response, modelName stri
 // 若后端已返回 Anthropic 格式 SSE，则直接透传
 // renderAnthropicEvent 输出带 event: 字段的标准 Anthropic SSE 事件
 // Anthropic SDK 依赖 event: 字段来识别事件类型
+
+// anthropicMsgId 生成一个随机的消息 id
+func anthropicMsgId() string {
+	return fmt.Sprintf("msg_%016x", uint64(helper.GetTimestamp())*0x9e3779b97f4a7c15)
+}
+
 func renderAnthropicEvent(c *gin.Context, eventType string, data any) {
 	jsonData, err := json.Marshal(data)
 	if err != nil {
@@ -409,6 +416,7 @@ func anthropicStreamRelay(c *gin.Context, resp *http.Response, promptTokens int)
 	started := false
 	blockStopped := false
 	passthroughMessageStop := false
+	passthroughModel := "" // 透传模式下记录后端返回的 model 名
 	index := 0
 	var msgId, modelName string
 
@@ -447,6 +455,17 @@ func anthropicStreamRelay(c *gin.Context, resp *http.Response, promptTokens int)
 			switch eventType {
 			case "message_start":
 				if msg, ok := event["message"].(map[string]any); ok {
+					// 补全后端可能返回的空 id / model
+					if id, ok := msg["id"].(string); !ok || id == "" || id == "msg_" {
+						msg["id"] = anthropicMsgId()
+					}
+					if mdl, ok := msg["model"].(string); !ok || mdl == "" {
+						if passthroughModel != "" {
+							msg["model"] = passthroughModel
+						}
+					} else {
+						passthroughModel = mdl
+					}
 					if u, ok := msg["usage"].(map[string]any); ok {
 						// 保留后端返回的 cache_creation_input_tokens / cache_read_input_tokens 等字段
 						// Claude Code SDK 对 usage 结构有严格校验，缺失 cache 字段会导致解析失败

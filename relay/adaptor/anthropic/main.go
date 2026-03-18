@@ -97,21 +97,33 @@ func ConvertRequest(textRequest model.GeneralOpenAIRequest) *Request {
 			Role: message.Role,
 		}
 		var claudeContents []Content
-		var content Content
-		if message.IsStringContent() {
-			content.Type = "text"
-			content.Text = message.StringContent()
-			if message.Role == "tool" {
-				claudeMessage.Role = "user"
-				content.Type = "tool_result"
-				content.Content = content.Text
-				content.Text = ""
-				content.ToolUseId = message.ToolCallId
+
+		// tool role → Anthropic tool_result（紧跟在 assistant tool_use 之后的 user 消息）
+		if message.Role == "tool" {
+			claudeMessage.Role = "user"
+			claudeContents = append(claudeContents, Content{
+				Type:      "tool_result",
+				ToolUseId: message.ToolCallId,
+				Content:   message.StringContent(),
+			})
+			claudeMessage.Content = claudeContents
+			claudeRequest.Messages = append(claudeRequest.Messages, claudeMessage)
+			continue
+		}
+
+		// assistant 消息：text + tool_use（ToolCalls）
+		if message.Role == "assistant" {
+			if textContent := message.StringContent(); textContent != "" {
+				claudeContents = append(claudeContents, Content{
+					Type: "text",
+					Text: textContent,
+				})
 			}
-			claudeContents = append(claudeContents, content)
 			for i := range message.ToolCalls {
 				inputParam := make(map[string]any)
-				_ = json.Unmarshal([]byte(message.ToolCalls[i].Function.Arguments.(string)), &inputParam)
+				if s, ok := message.ToolCalls[i].Function.Arguments.(string); ok && s != "" {
+					_ = json.Unmarshal([]byte(s), &inputParam)
+				}
 				claudeContents = append(claudeContents, Content{
 					Type:  "tool_use",
 					Id:    message.ToolCalls[i].Id,
@@ -119,6 +131,21 @@ func ConvertRequest(textRequest model.GeneralOpenAIRequest) *Request {
 					Input: inputParam,
 				})
 			}
+			if len(claudeContents) == 0 {
+				// 空 assistant 消息，跳过
+				continue
+			}
+			claudeMessage.Content = claudeContents
+			claudeRequest.Messages = append(claudeRequest.Messages, claudeMessage)
+			continue
+		}
+
+		// user 消息：text / image（IsStringContent 或 ParseContent）
+		var content Content
+		if message.IsStringContent() {
+			content.Type = "text"
+			content.Text = message.StringContent()
+			claudeContents = append(claudeContents, content)
 			claudeMessage.Content = claudeContents
 			claudeRequest.Messages = append(claudeRequest.Messages, claudeMessage)
 			continue
