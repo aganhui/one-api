@@ -56,7 +56,7 @@ func Relay(c *gin.Context) {
 		monitor.Emit(channelId, true)
 		return
 	}
-	lastFailedChannelId := channelId
+	failedChannelIds := map[int]bool{channelId: true}
 	channelName := c.GetString(ctxkey.ChannelName)
 	group := c.GetString(ctxkey.Group)
 	originalModel := c.GetString(ctxkey.OriginalModel)
@@ -73,10 +73,11 @@ func Relay(c *gin.Context) {
 			logger.Errorf(ctx, "CacheGetRandomSatisfiedChannel failed: %+v", err)
 			break
 		}
-		logger.Infof(ctx, "using channel #%d to retry (remain times %d)", channel.Id, i)
-		if channel.Id == lastFailedChannelId {
+		if failedChannelIds[channel.Id] {
+			logger.Infof(ctx, "channel #%d already failed, skipping (remain times %d)", channel.Id, i)
 			continue
 		}
+		logger.Infof(ctx, "using channel #%d to retry (remain times %d)", channel.Id, i)
 		middleware.SetupContextForSelectedChannel(c, channel, originalModel)
 		requestBody, err := common.GetRequestBody(c)
 		c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
@@ -85,7 +86,7 @@ func Relay(c *gin.Context) {
 			return
 		}
 		channelId := c.GetInt(ctxkey.ChannelId)
-		lastFailedChannelId = channelId
+		failedChannelIds[channelId] = true
 		channelName := c.GetString(ctxkey.ChannelName)
 		go processChannelRelayError(ctx, userId, channelId, channelName, *bizErr)
 	}
@@ -144,7 +145,7 @@ func RelayAnthropic(c *gin.Context) {
 		monitor.Emit(channelId, true)
 		return
 	}
-	lastFailedChannelId := channelId
+	failedChannelIds := map[int]bool{channelId: true}
 	channelName := c.GetString(ctxkey.ChannelName)
 	group := c.GetString(ctxkey.Group)
 	originalModel := c.GetString(ctxkey.OriginalModel)
@@ -161,10 +162,11 @@ func RelayAnthropic(c *gin.Context) {
 			logger.Errorf(ctx, "CacheGetRandomSatisfiedChannel failed: %+v", err)
 			break
 		}
-		logger.Infof(ctx, "using channel #%d to retry (remain times %d)", channel.Id, i)
-		if channel.Id == lastFailedChannelId {
+		if failedChannelIds[channel.Id] {
+			logger.Infof(ctx, "channel #%d already failed, skipping (remain times %d)", channel.Id, i)
 			continue
 		}
+		logger.Infof(ctx, "using channel #%d to retry (remain times %d)", channel.Id, i)
 		middleware.SetupContextForSelectedChannel(c, channel, originalModel)
 		requestBody, err := common.GetRequestBody(c)
 		c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
@@ -173,7 +175,7 @@ func RelayAnthropic(c *gin.Context) {
 			return
 		}
 		channelId := c.GetInt(ctxkey.ChannelId)
-		lastFailedChannelId = channelId
+		failedChannelIds[channelId] = true
 		channelName := c.GetString(ctxkey.ChannelName)
 		go processChannelRelayError(ctx, userId, channelId, channelName, *bizErr)
 	}
