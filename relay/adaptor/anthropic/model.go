@@ -130,8 +130,10 @@ type Request struct {
 }
 
 type Usage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+	InputTokens               int  `json:"input_tokens"`
+	OutputTokens              int  `json:"output_tokens"`
+	CacheCreationInputTokens  *int `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens      *int `json:"cache_read_input_tokens,omitempty"`
 }
 
 type Error struct {
@@ -153,10 +155,12 @@ type Response struct {
 
 type Delta struct {
 	Type         string  `json:"type"`
-	Text         string  `json:"text"`
+	Text         string  `json:"text,omitempty"`
 	PartialJson  string  `json:"partial_json,omitempty"`
-	StopReason   *string `json:"stop_reason"`
-	StopSequence *string `json:"stop_sequence"`
+	Thinking     string  `json:"thinking,omitempty"`
+	Signature    string  `json:"signature,omitempty"`
+	StopReason   *string `json:"stop_reason,omitempty"`
+	StopSequence *string `json:"stop_sequence,omitempty"`
 }
 
 type StreamResponse struct {

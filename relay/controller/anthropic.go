@@ -199,7 +199,8 @@ func openAIStopReasonToAnthropic(reason string) string {
 	case "tool_calls":
 		return "tool_use"
 	default:
-		return reason
+		// 非标准值统一映射为 end_turn，保持符合 Anthropic 枚举规范
+		return "end_turn"
 	}
 }
 
@@ -209,6 +210,7 @@ func openAIRespToAnthropic(resp *openai.TextResponse, modelName string) *anthrop
 	if !strings.HasPrefix(rawId, "msg_") {
 		rawId = "msg_" + rawId
 	}
+	zero := 0
 	ar := &anthropicAdaptor.Response{
 		Id:      rawId,
 		Type:    "message",
@@ -216,8 +218,10 @@ func openAIRespToAnthropic(resp *openai.TextResponse, modelName string) *anthrop
 		Model:   modelName,
 		Content: []anthropicAdaptor.Content{},
 		Usage: anthropicAdaptor.Usage{
-			InputTokens:  resp.Usage.PromptTokens,
-			OutputTokens: resp.Usage.CompletionTokens,
+			InputTokens:              resp.Usage.PromptTokens,
+			OutputTokens:             resp.Usage.CompletionTokens,
+			CacheCreationInputTokens: &zero,
+			CacheReadInputTokens:     &zero,
 		},
 	}
 	for _, choice := range resp.Choices {
@@ -315,7 +319,7 @@ func RelayAnthropicHelper(c *gin.Context) *model.ErrorWithStatusCode {
 	var usage *model.Usage
 	var respErr *model.ErrorWithStatusCode
 	if anthropicReq.Stream {
-		usage, respErr = anthropicStreamRelay(c, resp, m.PromptTokens)
+		usage, respErr = anthropicStreamRelay(c, resp, m.PromptTokens, actualModel)
 	} else {
 		usage, respErr = anthropicNonStreamRelay(c, resp, actualModel)
 	}
@@ -385,7 +389,7 @@ func renderAnthropicEvent(c *gin.Context, eventType string, data any) {
 	c.Writer.Flush()
 }
 
-func anthropicStreamRelay(c *gin.Context, resp *http.Response, promptTokens int) (*model.Usage, *model.ErrorWithStatusCode) {
+func anthropicStreamRelay(c *gin.Context, resp *http.Response, promptTokens int, actualModelName string) (*model.Usage, *model.ErrorWithStatusCode) {
 	common.SetEventStreamHeaders(c)
 	defer resp.Body.Close()
 
@@ -421,6 +425,9 @@ func anthropicStreamRelay(c *gin.Context, resp *http.Response, promptTokens int)
 	var msgId, modelName string
 
 	var completionTokens int
+	// OpenAI 转换路径：追踪当前活跃 content block 的类型和工具调用 id
+	currentBlockType := ""
+	currentToolId := ""
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -521,6 +528,9 @@ func anthropicStreamRelay(c *gin.Context, resp *http.Response, promptTokens int)
 				}
 				msgId = rawId
 				modelName = chunk.Model
+				if modelName == "" {
+					modelName = actualModelName
+				}
 				renderAnthropicEvent(c, "message_start", map[string]any{
 					"type": "message_start",
 					"message": map[string]any{
@@ -537,25 +547,76 @@ func anthropicStreamRelay(c *gin.Context, resp *http.Response, promptTokens int)
 				})
 				// Claude Code SDK 期望在 message_start 之后收到 ping 心跳
 				renderAnthropicEvent(c, "ping", map[string]any{"type": "ping"})
-				renderAnthropicEvent(c, "content_block_start", map[string]any{
-					"type": "content_block_start", "index": index,
-					"content_block": map[string]any{"type": "text", "text": ""},
-				})
 			}
 			for _, choice := range chunk.Choices {
+				// ── 文本内容 ─────────────────────────────────────────────────
 				if text, ok := choice.Delta.Content.(string); ok && text != "" {
+					if currentBlockType != "text" {
+						if currentBlockType != "" {
+							renderAnthropicEvent(c, "content_block_stop", map[string]any{
+								"type": "content_block_stop", "index": index,
+							})
+							index++
+						}
+						renderAnthropicEvent(c, "content_block_start", map[string]any{
+							"type": "content_block_start", "index": index,
+							"content_block": map[string]any{"type": "text", "text": ""},
+						})
+						currentBlockType = "text"
+					}
 					completionTokens++
 					renderAnthropicEvent(c, "content_block_delta", map[string]any{
 						"type": "content_block_delta", "index": index,
 						"delta": map[string]any{"type": "text_delta", "text": text},
 					})
 				}
+				// ── 工具调用 ─────────────────────────────────────────────────
+				for _, tc := range choice.Delta.ToolCalls {
+					if tc.Id != "" {
+						// 新工具调用块开始，先关闭当前活跃块
+						if currentBlockType != "" {
+							renderAnthropicEvent(c, "content_block_stop", map[string]any{
+								"type": "content_block_stop", "index": index,
+							})
+							index++
+						}
+						toolName := tc.Function.Name
+						renderAnthropicEvent(c, "content_block_start", map[string]any{
+							"type": "content_block_start", "index": index,
+							"content_block": map[string]any{
+								"type":  "tool_use",
+								"id":    tc.Id,
+								"name":  toolName,
+								"input": map[string]any{},
+							},
+						})
+						currentBlockType = "tool_use"
+						currentToolId = tc.Id
+					}
+					// 工具参数增量片段
+					if args, ok := tc.Function.Arguments.(string); ok && args != "" {
+						if tc.Id != "" {
+							currentToolId = tc.Id
+						}
+						if currentToolId != "" && currentBlockType == "tool_use" {
+							renderAnthropicEvent(c, "content_block_delta", map[string]any{
+								"type": "content_block_delta", "index": index,
+								"delta": map[string]any{
+									"type":         "input_json_delta",
+									"partial_json": args,
+								},
+							})
+						}
+					}
+				}
 				if choice.FinishReason != nil && *choice.FinishReason != "" && *choice.FinishReason != "null" {
 					sr := openAIStopReasonToAnthropic(*choice.FinishReason)
 					blockStopped = true
-					renderAnthropicEvent(c, "content_block_stop", map[string]any{
-						"type": "content_block_stop", "index": index,
-					})
+					if currentBlockType != "" {
+						renderAnthropicEvent(c, "content_block_stop", map[string]any{
+							"type": "content_block_stop", "index": index,
+						})
+					}
 					renderAnthropicEvent(c, "message_delta", map[string]any{
 						"type": "message_delta",
 						"delta": map[string]any{"stop_reason": sr, "stop_sequence": nil},
